@@ -1,63 +1,101 @@
 package main
 
-type Position [3]float32
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+	"runtime"
+	"sync"
+	"sync/atomic"
+)
+
+type Position [5]float32
 
 type OctNode struct {
-	In        chan Position
-	Center    Position
-	Size      float32
-	Neighbour [8]chan Position
-	List      []Position
+	count int32
 }
 
-func displace(p Position, size float32, direction int) Position {
-	var r Position
-	r[0] = p[0] - size/2 + float32(direction%2)*size
-	r[1] = p[1] - size/2 + float32((direction>>1)%2)*size
-	r[2] = p[2] - size/2 + float32((direction>>2)%2)*size
-	return r
-}
+const NUM = 1024.0
+const INUM = 1024
+const SIZE = 40000.0
 
-func (ch *OctNode) Init() {
-	for i := 0; i < len(ch.Neighbour); i++ {
-		c := make(chan Position)
-		ch.Neighbour[i] = c
+func pos2ind(x float32) (xx int, e error) {
+	xx = int(NUM * (x/SIZE + 0.5))
 
-		go func(c chan Position) {
-			node := OctNode{In: c, Center: displace(ch.Center, ch.Size, i), Size: ch.Size / 2}
-			for p := range c {
-				node.List = append(node.List, p)
-			}
-
-		}(c)
+	if xx < 0 || xx >= int(NUM) {
+		e = errors.New("out of range")
 	}
+	return
+}
 
+func position2index(p Position) (index int, err error) {
+	xx, errX := pos2ind(p[2])
+	yy, errY := pos2ind(p[3])
+	zz, errZ := pos2ind(p[4])
+	if errX != nil || errY != nil || errZ != nil {
+		err = errors.New("out of range")
+	} else {
+		index = xx*(INUM*INUM) + yy*(INUM) + zz
+	}
+	return
+}
+
+func oneBlock(oct []int32, positions []Position) {
+
+	for _, pos := range positions {
+
+		i, err := position2index(pos)
+		if err == nil {
+			atomic.AddInt32(&oct[i], 1)
+
+		}
+	}
+	return
+}
+
+// HandleBlocks read filenames from chanel ch and puts them on chanel output
+func HandleBlocks(oct []int32, ch chan []Position, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for s := range ch {
+		oneBlock(oct, s)
+		fmt.Printf("%s\n", s)
+	}
+	fmt.Printf("End of Jobs\n")
 }
 
 func main() {
-	root := Oct{Center: [3]float32{0.0, 0.0, 0.0}, Size: 3000}
-
-	/*var num int64
-	num = 1000 * 1000 * 1000*/
-
-	back := make(chan int)
-
-	var channels [2]chan [3]float32
-	for i := range channels {
-		channels[i] = make(chan [3]float32)
+	oct := make([]int32, INUM*INUM*INUM)
+	input, err := os.Open("result.dat")
+	if err != nil {
+		fmt.Errorf("Cannot open result")
 	}
 
-	for _, c := range channels {
-
-		go func(ch chan [3]float32) {
-			a := <-ch
-			back <- 1
-
-		}(c)
+	// Reader
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go func(wg *sync.WaitGroup) {
+			wg.Add(1)
+			OneBlock(oct, positions)
+		}(&wg)
 	}
 
-	for i, c := range channels {
-		c <- [3]float32{float32(i), float32(i), float32(i)}
-	}
+	for {
+		positions := make([]Position, 1024*20)
+		err := binary.Read(input, binary.LittleEndian, &positions)
+		if err != nil {
+			fmt.Errorf("Readerror")
+		}
 
+		/*	byteBuf := make([]byte, 20*1024)
+			remainingLen := 0
+
+			len, err := input.Read(byteBuf[remainingLen:])
+			if err != nil {
+				fmt.Errorf("Error")
+			}
+			usableLen := 20 * (len / 20)
+			remainingLen = len - usableLen
+			binary.Read( 	)*/
+
+	}
 }
