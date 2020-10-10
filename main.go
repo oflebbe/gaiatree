@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,6 +15,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -169,14 +171,25 @@ func handleTar(fn string, fileChannel chan []byte) {
 		}
 		fileChannel <- buf
 		counter++
-		/* if counter > 100 {
+		if counter > 500 {
 			return
-		}*/
+		}
 	}
 
 }
 
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
 func main() {
+	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
 
 	oct := make([]int32, INUM*INUM*INUM)
 
